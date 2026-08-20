@@ -164,99 +164,122 @@
       return data.href;
     }
 
-    // --- STAC SEARCH & IMAGERY FETCHING ---
-    getImageryBtn.addEventListener('click', async () => {
-      hideStatus();
-      getImageryBtn.disabled = true;
-      getImageryBtn.innerText = 'Searching STAC...';
+  // --- STAC SEARCH & IMAGERY FETCHING ---
+getImageryBtn.addEventListener('click', async () => {
+  hideStatus();
+  getImageryBtn.disabled = true;
+  getImageryBtn.innerText = 'Searching STAC...';
 
-      try {
-        // Calculate extent in EPSG:4326
-        const extent = map.getView().calculateExtent(map.getSize());
-        const bbox = ol.proj.transformExtent(extent, map.getView().getProjection(), 'EPSG:4326');
+  try {
+    // 1. Calculate & Clamp Extent to Valid [-180, -90, 180, 90] Bounds
+    const extent = map.getView().calculateExtent(map.getSize());
+    const rawBbox = ol.proj.transformExtent(extent, map.getView().getProjection(), 'EPSG:4326');
+    
+    const bbox = [
+      Math.max(-180, Math.min(180, rawBbox[0])),
+      Math.max(-90, Math.min(90, rawBbox[1])),
+      Math.max(-180, Math.min(180, rawBbox[2])),
+      Math.max(-90, Math.min(90, rawBbox[3]))
+    ];
 
-        // ISO Date Range for last 24 hours
-        const now = new Date();
-        const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        const datetime = `${yesterday.toISOString()}/${now.toISOString()}`;
+    // 2. Format ISO Range without Milliseconds (48h safety window)
+    const now = new Date();
+    const past = new Date(now.getTime() - 48 * 60 * 60 * 1000); // 48 hours ago
+    
+    const formatIso = (date) => date.toISOString().split('.')[0] + 'Z';
+    const datetime = `${formatIso(past)}/${formatIso(now)}`;
 
-        const stacQuery = {
-          collections: ['sentinel-2-l2a'],
-          bbox: bbox,
-          datetime: datetime,
-          limit: 1
-        };
-
-        const res = await fetch('https://planetarycomputer.microsoft.com/api/stac/v1/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(stacQuery)
-        });
-
-        const stacData = await res.json();
-
-        if (!stacData.features || stacData.features.length === 0) {
-          showStatus('No imagery acquired in the past 24 hours.', 'error');
-          getImageryBtn.disabled = false;
-          getImageryBtn.innerText = 'Get Imagery (Last 24h)';
-          return;
+    // 3. STAC Query with Explicit Descending Datetime Sort
+    const stacQuery = {
+      collections: ['sentinel-2-l2a'],
+      bbox: bbox,
+      datetime: datetime,
+      limit: 1,
+      sortby: [
+        {
+          field: "properties.datetime",
+          direction: "desc"
         }
+      ]
+    };
 
-        showStatus('Scene found! Signing assets & loading COG...', 'info');
+    const res = await fetch('https://planetarycomputer.microsoft.com/api/stac/v1/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(stacQuery)
+    });
 
-        const item = stacData.features[0];
-        // SWIR RGB Composition: Red = Band 12, Green = Band 8A, Blue = Band 4
-        const b12Href = item.assets['B12'].href;
-        const b8aHref = item.assets['B8A'].href;
-        const b04Href = item.assets['B04'].href;
+    if (!res.ok) {
+      throw new Error(`STAC search HTTP error! status: ${res.status}`);
+    }
 
-        // Sign all 3 COG URLs concurrently
-        const [signedB12, signedB8A, signedB04] = await Promise.all([
-          signUrl(b12Href),
-          signUrl(b8aHref),
-          signUrl(b04Href)
-        ]);
+    const stacData = await res.json();
 
-        // Remove old COG layer if present
-        if (currentCogLayer) {
-          map.removeLayer(currentCogLayer);
-        }
+    if (!stacData.features || stacData.features.length === 0) {
+      showStatus('No imagery acquired in the search window (48h).', 'error');
+      getImageryBtn.disabled = false;
+      getImageryBtn.innerText = 'Get Imagery';
+      return;
+    }
 
-        // Configure WebGL COG Source with reflectance scaling (0-3000 typical reflectance range)
-        const cogSource = new ol.source.GeoTIFF({
-          sources: [
-            { url: signedB12, min: 0, max: 3000 },
-            { url: signedB8A, min: 0, max: 3000 },
-            { url: signedB04, min: 0, max: 3000 }
-          ]
-        });
+    const item = stacData.features[0];
+    showStatus(`Loading scene: ${item.id} (${item.properties.datetime.slice(0, 16)} UTC)`, 'info');
 
-        // WebGL Composite Style
-        currentCogLayer = new ol.layer.WebGLTile({
-          source: cogSource,
-          style: {
-            color: [
-              'array',
-              ['band', 1], // R = B12
-              ['band', 2], // G = B8A
-              ['band', 3], // B = B04
-              1            // Alpha
-            ]
-          }
-        });
+    // 4. Extract and Sign COG Asset URLs
+    const b12Href = item.assets['B12'] ? item.assets['B12'].href : null;
+    const b8aHref = item.assets['B8A'] ? item.assets['B8A'].href : null;
+    const b04Href = item.assets['B04'] ? item.assets['B04'].href : null;
 
-        // Insert COG layer right above base map
-        map.getLayers().insertAt(1, currentCogLayer);
-        showStatus(`Loaded scene from ${item.properties.datetime.slice(0, 16)} UTC`, 'info');
+    if (!b12Href || !b8aHref || !b04Href) {
+      showStatus('Required spectral bands (B12, B8A, B04) missing from scene.', 'error');
+      getImageryBtn.disabled = false;
+      getImageryBtn.innerText = 'Get Imagery';
+      return;
+    }
 
-      } catch (err) {
-        console.error(err);
-        showStatus('Error querying or loading satellite imagery.', 'error');
-      } finally {
-        getImageryBtn.disabled = false;
-        getImageryBtn.innerText = 'Get Imagery (Last 24h)';
+    const [signedB12, signedB8A, signedB04] = await Promise.all([
+      signUrl(b12Href),
+      signUrl(b8aHref),
+      signUrl(b04Href)
+    ]);
+
+    // 5. Update WebGL Layer
+    if (currentCogLayer) {
+      map.removeLayer(currentCogLayer);
+    }
+
+    const cogSource = new ol.source.GeoTIFF({
+      sources: [
+        { url: signedB12, min: 0, max: 3000 },
+        { url: signedB8A, min: 0, max: 3000 },
+        { url: signedB04, min: 0, max: 3000 }
+      ]
+    });
+
+    currentCogLayer = new ol.layer.WebGLTile({
+      source: cogSource,
+      style: {
+        color: [
+          'array',
+          ['band', 1], // Red = B12
+          ['band', 2], // Green = B8A
+          ['band', 3], // Blue = B04
+          1            // Alpha
+        ]
       }
     });
+
+    map.getLayers().insertAt(1, currentCogLayer);
+    showStatus(`Loaded: ${item.properties.datetime.slice(0, 16)} UTC`, 'info');
+
+  } catch (err) {
+    console.error(err);
+    showStatus(`Error: ${err.message}`, 'error');
+  } finally {
+    getImageryBtn.disabled = false;
+    getImageryBtn.innerText = 'Get Imagery';
+  }
+});
 
     // --- ANNOTATION DRAWING TOOL ---
     drawBtn.addEventListener('click', () => {
