@@ -261,21 +261,24 @@ getImageryBtn.addEventListener('click', async () => {
 
     const cogSource = new ol.source.GeoTIFF({
       sources: [
-        { url: signedB12, min: 0, max: 3000 },
-        { url: signedB8A, min: 0, max: 3000 },
-        { url: signedB04, min: 0, max: 3000 }
-      ]
+        { url: signedB12 },
+        { url: signedB8A },
+        { url: signedB04 }
+      ],
+      normalize: false,             // Raw 16-bit values passed to WebGL shader
+      loadMissingProjection: true   // Auto-fetches missing UTM EPSG definitions from the web
     });
 
+    // 6. Create WebGL Tile Layer with explicit reflectance scaling (0 - 3000)
     currentCogLayer = new ol.layer.WebGLTile({
       source: cogSource,
       style: {
         color: [
           'array',
-          ['band', 1], // Red = B12
-          ['band', 2], // Green = B8A
-          ['band', 3], // Blue = B04
-          1            // Alpha
+          ['/', ['band', 1], 3000], // Scale Band 12 (Red)
+          ['/', ['band', 2], 3000], // Scale Band 8A (Green)
+          ['/', ['band', 3], 3000], // Scale Band 04 (Blue)
+          1                         // Full opacity
         ]
       }
     });
