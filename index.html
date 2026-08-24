@@ -281,9 +281,9 @@ getImageryBtn.addEventListener('click', async () => {
             ['/', ['band', 2], 3000], // Green = B8A
             ['/', ['band', 3], 3000], // Blue = B04
             
-            // Alpha: 1 (opaque) if bands > 0, 0 (transparent) if nodata padding
+            // Alpha: 1 (opaque) if ALL bands > 0, 0 (transparent) if nodata border
             ['case',
-              ['and',
+              ['all',
                 ['>', ['band', 1], 0],
                 ['>', ['band', 2], 0],
                 ['>', ['band', 3], 0]
