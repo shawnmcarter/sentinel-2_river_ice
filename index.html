@@ -454,23 +454,36 @@ exportGeoJsonBtn.addEventListener('click', () => {
     alert('No ice boundary annotations to export!');
     return;
   }
+  
   const writer = new ol.format.GeoJSON();
   const geojsonStr = writer.writeFeatures(vectorSource.getFeatures(), {
     featureProjection: map.getView().getProjection(),
     dataProjection: 'EPSG:4326'
   });
 
+  // Format AOI name for filename
+  const selectedAoi = aoiSelect.value;
+  const sanitizedAoi = selectedAoi 
+    ? selectedAoi.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') 
+    : 'custom_extent';
+  const dateStr = new Date().toISOString().slice(0, 10);
+
   const blob = new Blob([geojsonStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `river_ice_annotation_${new Date().toISOString().slice(0, 10)}.geojson`;
+  a.download = `river_ice_annotation_${sanitizedAoi}_${dateStr}.geojson`;
   a.click();
   URL.revokeObjectURL(url);
 });
 
-// --- EXPORT FUNCTION 2: VIEWPORT PNG ---
+// --- EXPORT FUNCTION 2: VIEWPORT PNG (SUPPRESSES AOI LAYER) ---
 exportPngBtn.addEventListener('click', () => {
+  // 1. Store original visibility and temporarily hide reference AOI layer
+  const wasAoiVisible = aoiLayer.getVisible();
+  aoiLayer.setVisible(false);
+
+  // 2. Render and capture screen frame without AOI layer
   map.once('rendercomplete', () => {
     const mapCanvas = document.createElement('canvas');
     const size = map.getSize();
@@ -489,13 +502,24 @@ exportPngBtn.addEventListener('click', () => {
       }
     );
 
+    // Format AOI name for filename
+    const selectedAoi = aoiSelect.value;
+    const sanitizedAoi = selectedAoi 
+      ? selectedAoi.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') 
+      : 'custom_extent';
+    const dateStr = new Date().toISOString().slice(0, 10);
+
     const link = document.createElement('a');
-    link.download = `river_ice_viewport_${new Date().toISOString().slice(0, 10)}.png`;
+    link.download = `river_ice_viewport_${sanitizedAoi}_${dateStr}.png`;
     link.href = mapCanvas.toDataURL('image/png');
     link.click();
+
+    // 3. Restore AOI layer visibility on the map
+    aoiLayer.setVisible(wasAoiVisible);
   });
+
   map.renderSync();
-}); 
+});
   </script>
 </body>
 </html>
