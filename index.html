@@ -91,6 +91,14 @@
       <p style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 8px;">Zoom into target river area and query latest Sentinel-2 scene.</p>
       <button id="get-imagery-btn">Get Imagery (Last 24h)</button>
       <div id="status-msg"></div>
+      <div>
+      <div class="section-title">Image Stretch Control</div>
+      <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #94a3b8; margin-bottom: 4px;">
+        <span>Max Reflectance</span>
+        <span id="stretch-val">3000</span>
+      </div>
+        <input type="range" id="stretch-slider" min="1000" max="10000" step="250" value="3000" style="width: 100%; cursor: pointer;">
+      </div>
     </div>
 
     <div>
@@ -167,6 +175,9 @@ function showStatus(message, type) {
 function hideStatus() {
   statusMsg.style.display = 'none';
 }
+// --- DOM ELEMENTS 
+const stretchSlider = document.getElementById('stretch-slider');
+const stretchVal = document.getElementById('stretch-val');
 
 // --- PLANETARY COMPUTER SAS TOKEN SERVICE ---
 let cachedSasToken = null;
@@ -250,51 +261,55 @@ getImageryBtn.addEventListener('click', async () => {
     // 5. Clear existing satellite layers
     cogGroup.getLayers().clear();
 
-    // 6. Sign bands and apply WebGL transparency mask for nodata (0-value) collar pixels
-    const layers = stacData.features.map((item) => {
-      const b12 = item.assets['B12']?.href;
-      const b8a = item.assets['B8A']?.href;
-      const b04 = item.assets['B04']?.href;
+    // --- LAYER CREATION INSIDE getImageryBtn HANDLER ---
+const currentStretch = Number(stretchSlider.value);
 
-      if (!b12 || !b8a || !b04) return null;
+const layers = stacData.features.map((item) => {
+  const b12 = item.assets['B12']?.href;
+  const b8a = item.assets['B8A']?.href;
+  const b04 = item.assets['B04']?.href;
 
-      const signedB12 = `${b12}?${sasToken}`;
-      const signedB8A = `${b8a}?${sasToken}`;
-      const signedB04 = `${b04}?${sasToken}`;
+  if (!b12 || !b8a || !b04) return null;
 
-      const cogSource = new ol.source.GeoTIFF({
-        sources: [
-          { url: signedB12 },
-          { url: signedB8A },
-          { url: signedB04 }
-        ],
-        normalize: false,
-        loadMissingProjection: true
-      });
+  const signedB12 = `${b12}?${sasToken}`;
+  const signedB8A = `${b8a}?${sasToken}`;
+  const signedB04 = `${b04}?${sasToken}`;
 
-      return new ol.layer.WebGLTile({
-        source: cogSource,
-        style: {
-          color: [
-            'array',
-            ['/', ['band', 1], 3000], // Red = B12
-            ['/', ['band', 2], 3000], // Green = B8A
-            ['/', ['band', 3], 3000], // Blue = B04
-            
-            // Alpha: 1 (opaque) if ALL bands > 0, 0 (transparent) if nodata border
-            ['case',
-              ['all',
-                ['>', ['band', 1], 0],
-                ['>', ['band', 2], 0],
-                ['>', ['band', 3], 0]
-              ],
-              1,
-              0
-            ]
-          ]
-        }
-      });
-    }).filter(Boolean);
+  const cogSource = new ol.source.GeoTIFF({
+    sources: [
+      { url: signedB12 },
+      { url: signedB8A },
+      { url: signedB04 }
+    ],
+    normalize: false,
+    loadMissingProjection: true
+  });
+
+  return new ol.layer.WebGLTile({
+    source: cogSource,
+    style: {
+      variables: {
+        maxReflectance: currentStretch
+      },
+      color: [
+        'array',
+        ['/', ['band', 1], ['var', 'maxReflectance']], // Red = B12
+        ['/', ['band', 2], ['var', 'maxReflectance']], // Green = B8A
+        ['/', ['band', 3], ['var', 'maxReflectance']], // Blue = B04
+        
+        ['case',
+          ['all',
+            ['>', ['band', 1], 0],
+            ['>', ['band', 2], 0],
+            ['>', ['band', 3], 0]
+          ],
+          1,
+          0
+        ]
+      ]
+    }
+  });
+}).filter(Boolean);
 
     if (layers.length === 0) {
       showStatus('No scenes with required bands were found.', 'error');
