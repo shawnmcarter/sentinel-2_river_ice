@@ -161,22 +161,6 @@ const labelsLayer = new ol.layer.Tile({
   })
 });
 
-// --- MAP SETUP (Labels placed above satellite imagery & reference vectors) ---
-const map = new ol.Map({
-  target: 'map',
-  layers: [
-    baseOsm,      // 0: Dark base map
-    cogGroup,     // 1: Sentinel-2 COG mosaic
-    aoiLayer,     // 2: Reference AOI footprints
-    labelsLayer,  // 3: Transparent Labels (Towns, Rivers, Borders)
-    vectorLayer   // 4: Hydrologist Drawing Annotations (topmost)
-  ],
-  view: new ol.View({
-    center: ol.proj.fromLonLat([-80.0, 43.0]),
-    zoom: 5
-  })
-});
-
 let drawInteraction = null;
 
 // --- DOM ELEMENTS ---
@@ -240,6 +224,21 @@ const aoiLayer = new ol.layer.Vector({
   })
 });
 
+// --- MAP SETUP  ---
+const map = new ol.Map({
+  target: 'map',
+  layers: [
+    baseOsm,      // 0: Dark base map
+    cogGroup,     // 1: Sentinel-2 COG mosaic
+    aoiLayer,     // 2: Reference AOI footprints
+    labelsLayer,  // 3: Transparent Labels (Towns, Rivers, Borders)
+    vectorLayer   // 4: Hydrologist Drawing Annotations (topmost)
+  ],
+  view: new ol.View({
+    center: ol.proj.fromLonLat([-80.0, 43.0]),
+    zoom: 5
+  })
+});
 // --- POPULATE DROPDOWN & HANDLE NAVIGATION ---
 const aoiSelect = document.getElementById('aoi-select');
 
