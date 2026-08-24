@@ -153,12 +153,27 @@ const vectorLayer = new ol.layer.Vector({
   style: vectorStyle
 });
 
+// --- ALWAYS-ON-TOP LABELS LAYER ---
+const labelsLayer = new ol.layer.Tile({
+  source: new ol.source.OSM({
+    url: 'https://{a-c}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',
+    crossOrigin: 'anonymous' // Crucial for clean canvas PNG exports
+  })
+});
+
+// --- MAP SETUP (Labels placed above satellite imagery & reference vectors) ---
 const map = new ol.Map({
   target: 'map',
-  layers: [baseOsm, cogGroup, vectorLayer],
+  layers: [
+    baseOsm,      // 0: Dark base map
+    cogGroup,     // 1: Sentinel-2 COG mosaic
+    aoiLayer,     // 2: Reference AOI footprints
+    labelsLayer,  // 3: Transparent Labels (Towns, Rivers, Borders)
+    vectorLayer   // 4: Hydrologist Drawing Annotations (topmost)
+  ],
   view: new ol.View({
-    center: ol.proj.fromLonLat([-100.0, 60.0]),
-    zoom: 4
+    center: ol.proj.fromLonLat([-80.0, 43.0]),
+    zoom: 5
   })
 });
 
