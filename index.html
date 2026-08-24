@@ -225,16 +225,6 @@ const aoiLayer = new ol.layer.Vector({
   })
 });
 
-// Include aoiLayer in map setup
-const map = new ol.Map({
-  target: 'map',
-  layers: [baseOsm, cogGroup, aoiLayer, vectorLayer],
-  view: new ol.View({
-    center: ol.proj.fromLonLat([-80.0, 43.0]),
-    zoom: 5
-  })
-});
-
 // --- POPULATE DROPDOWN & HANDLE NAVIGATION ---
 const aoiSelect = document.getElementById('aoi-select');
 
