@@ -250,7 +250,7 @@ getImageryBtn.addEventListener('click', async () => {
     // 5. Clear existing satellite layers
     cogGroup.getLayers().clear();
 
-    // 6. Sign bands via URL parameters synchronously
+    // 6. Sign bands and apply WebGL transparency mask for nodata (0-value) collar pixels
     const layers = stacData.features.map((item) => {
       const b12 = item.assets['B12']?.href;
       const b8a = item.assets['B8A']?.href;
@@ -280,7 +280,17 @@ getImageryBtn.addEventListener('click', async () => {
             ['/', ['band', 1], 3000], // Red = B12
             ['/', ['band', 2], 3000], // Green = B8A
             ['/', ['band', 3], 3000], // Blue = B04
-            1
+            
+            // Alpha: 1 (opaque) if bands > 0, 0 (transparent) if nodata padding
+            ['case',
+              ['and',
+                ['>', ['band', 1], 0],
+                ['>', ['band', 2], 0],
+                ['>', ['band', 3], 0]
+              ],
+              1,
+              0
+            ]
           ]
         }
       });
