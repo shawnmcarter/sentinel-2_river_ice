@@ -118,14 +118,14 @@
   <div id="map"></div>
 
   <script>
-    // --- MAP & BASE LAYERS INITIALIZATION ---
+  // --- MAP & BASE LAYERS INITIALIZATION ---
 const baseOsm = new ol.layer.Tile({
   source: new ol.source.OSM({
     url: 'https://{a-c}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
   })
 });
 
-// Layer group to hold multiple satellite scene tiles simultaneously
+// Container for multi-tile scene mosaics
 const cogGroup = new ol.layer.Group();
 
 const vectorSource = new ol.source.Vector();
@@ -168,13 +168,25 @@ function hideStatus() {
   statusMsg.style.display = 'none';
 }
 
-// --- PLANETARY COMPUTER SAS TOKEN SIGNER ---
-async function signUrl(href) {
-  const params = new URLSearchParams({ href: href });
-  const response = await fetch(`https://planetarycomputer.microsoft.com/api/sas/v1/sign?${params}`);
-  if (!response.ok) throw new Error('Token signing failed');
+// --- PLANETARY COMPUTER SAS TOKEN SERVICE ---
+let cachedSasToken = null;
+let tokenExpiry = null;
+
+async function getSasToken() {
+  // Reuse token if cached and not expired
+  if (cachedSasToken && tokenExpiry && new Date() < tokenExpiry) {
+    return cachedSasToken;
+  }
+
+  const response = await fetch('https://planetarycomputer.microsoft.com/api/sas/v1/token/sentinel-2-l2a');
+  if (!response.ok) throw new Error(`SAS token request failed: HTTP ${response.status}`);
+  
   const data = await response.json();
-  return data.href;
+  cachedSasToken = data.token;
+  if (data['msft:expiry']) {
+    tokenExpiry = new Date(data['msft:expiry']);
+  }
+  return cachedSasToken;
 }
 
 // --- STAC SEARCH & MULTI-SCENE FETCHING ---
@@ -221,7 +233,7 @@ getImageryBtn.addEventListener('click', async () => {
       body: JSON.stringify(stacQuery)
     });
 
-    if (!res.ok) throw new Error(`STAC search failed: ${res.status}`);
+    if (!res.ok) throw new Error(`STAC search failed: HTTP ${res.status}`);
 
     const stacData = await res.json();
 
@@ -230,24 +242,25 @@ getImageryBtn.addEventListener('click', async () => {
       return;
     }
 
-    showStatus(`Found ${stacData.features.length} scene(s). Signing & loading...`, 'info');
+    showStatus(`Found ${stacData.features.length} scene(s). Fetching token & loading...`, 'info');
 
-    // 4. Clear existing satellite layers
+    // 4. Retrieve single Collection Token (1 request total)
+    const sasToken = await getSasToken();
+
+    // 5. Clear existing satellite layers
     cogGroup.getLayers().clear();
 
-    // 5. Process and sign all scenes concurrently
-    const layerPromises = stacData.features.map(async (item) => {
+    // 6. Sign bands via URL parameters synchronously
+    const layers = stacData.features.map((item) => {
       const b12 = item.assets['B12']?.href;
       const b8a = item.assets['B8A']?.href;
       const b04 = item.assets['B04']?.href;
 
       if (!b12 || !b8a || !b04) return null;
 
-      const [signedB12, signedB8A, signedB04] = await Promise.all([
-        signUrl(b12),
-        signUrl(b8a),
-        signUrl(b04)
-      ]);
+      const signedB12 = `${b12}?${sasToken}`;
+      const signedB8A = `${b8a}?${sasToken}`;
+      const signedB04 = `${b04}?${sasToken}`;
 
       const cogSource = new ol.source.GeoTIFF({
         sources: [
@@ -271,17 +284,14 @@ getImageryBtn.addEventListener('click', async () => {
           ]
         }
       });
-    });
-
-    // 6. Wait for all layers to resolve
-    const layers = (await Promise.all(layerPromises)).filter(Boolean);
+    }).filter(Boolean);
 
     if (layers.length === 0) {
       showStatus('No scenes with required bands were found.', 'error');
       return;
     }
 
-    // 7. Add all resolved layers to the group
+    // 7. Add all resolved layers to map
     layers.forEach(layer => cogGroup.getLayers().push(layer));
 
     showStatus(`Successfully loaded ${layers.length} scene(s) into view.`, 'info');
@@ -366,7 +376,7 @@ exportPngBtn.addEventListener('click', () => {
     link.click();
   });
   map.renderSync();
-});
+}); 
   </script>
 </body>
 </html>
