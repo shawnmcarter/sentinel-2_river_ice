@@ -145,7 +145,8 @@
       })
     });
 
-    let currentCogLayer = null;
+    const cogGroup = new ol.layer.Group();
+    map.getLayers().insertAt(1, cogGroup);
     let drawInteraction = null;
 
     // --- DOM ELEMENTS ---
@@ -175,14 +176,14 @@
       return data.href;
     }
 
-  // --- STAC SEARCH & IMAGERY FETCHING ---
+ // --- STAC SEARCH & MULTI-SCENE FETCHING ---
 getImageryBtn.addEventListener('click', async () => {
   hideStatus();
   getImageryBtn.disabled = true;
   getImageryBtn.innerText = 'Searching STAC...';
 
   try {
-    // 1. Calculate & Clamp Extent to Valid [-180, -90, 180, 90] Bounds
+    // 1. Calculate & Clamp Bounding Box
     const extent = map.getView().calculateExtent(map.getSize());
     const rawBbox = ol.proj.transformExtent(extent, map.getView().getProjection(), 'EPSG:4326');
     
@@ -193,19 +194,18 @@ getImageryBtn.addEventListener('click', async () => {
       Math.max(-90, Math.min(90, rawBbox[3]))
     ];
 
-    // 2. Format ISO Range without Milliseconds (48h safety window)
+    // 2. Timestamps (48h Window)
     const now = new Date();
-    const past = new Date(now.getTime() - 48 * 60 * 60 * 1000); // 48 hours ago
-    
+    const past = new Date(now.getTime() - 48 * 60 * 60 * 1000);
     const formatIso = (date) => date.toISOString().split('.')[0] + 'Z';
     const datetime = `${formatIso(past)}/${formatIso(now)}`;
 
-    // 3. STAC Query with Explicit Descending Datetime Sort
+    // 3. Query STAC for up to 10 matching tiles
     const stacQuery = {
       collections: ['sentinel-2-l2a'],
       bbox: bbox,
       datetime: datetime,
-      limit: 1,
+      limit: 10,
       sortby: [
         {
           field: "properties.datetime",
@@ -213,6 +213,86 @@ getImageryBtn.addEventListener('click', async () => {
         }
       ]
     };
+
+    const res = await fetch('https://planetarycomputer.microsoft.com/api/stac/v1/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(stacQuery)
+    });
+
+    if (!res.ok) throw new Error(`STAC search failed: ${res.status}`);
+
+    const stacData = await res.json();
+
+    if (!stacData.features || stacData.features.length === 0) {
+      showStatus('No imagery acquired in the search window (48h).', 'error');
+      return;
+    }
+
+    showStatus(`Found ${stacData.features.length} scene(s). Signing & loading...`, 'info');
+
+    // 4. Clear any previously loaded layers
+    cogGroup.getLayers().clear();
+
+    // 5. Process and sign all scenes concurrently
+    const layerPromises = stacData.features.map(async (item) => {
+      const b12 = item.assets['B12']?.href;
+      const b8a = item.assets['B8A']?.href;
+      const b04 = item.assets['B04']?.href;
+
+      if (!b12 || !b8a || !b04) return null;
+
+      const [signedB12, signedB8A, signedB04] = await Promise.all([
+        signUrl(b12),
+        signUrl(b8a),
+        signUrl(b04)
+      ]);
+
+      const cogSource = new ol.source.GeoTIFF({
+        sources: [
+          { url: signedB12 },
+          { url: signedB8A },
+          { url: signedB04 }
+        ],
+        normalize: false,
+        loadMissingProjection: true
+      });
+
+      return new ol.layer.WebGLTile({
+        source: cogSource,
+        style: {
+          color: [
+            'array',
+            ['/', ['band', 1], 3000], // Red = B12
+            ['/', ['band', 2], 3000], // Green = B8A
+            ['/', ['band', 3], 3000], // Blue = B04
+            1
+          ]
+        }
+      });
+    });
+
+    // 6. Wait for all layers to resolve and filter out nulls
+    const layers = (await Promise.all(layerPromises)).filter(Boolean);
+
+    if (layers.length === 0) {
+      showStatus('No scenes with required bands were found.', 'error');
+      return;
+    }
+
+    // 7. Add all resolved layers into the layer group
+    layers.forEach(layer => cogGroup.getLayers().push(layer));
+
+    showStatus(`Successfully loaded ${layers.length} scene(s) into view.`, 'info');
+
+  } catch (err) {
+    console.error(err);
+    showStatus(`Error: ${err.message}`, 'error');
+  } finally {
+    getImageryBtn.disabled = false;
+    getImageryBtn.innerText = 'Get Imagery';
+  }
+});
 
     const res = await fetch('https://planetarycomputer.microsoft.com/api/stac/v1/search', {
       method: 'POST',
