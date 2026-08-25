@@ -109,14 +109,24 @@
 
     <div>
       <div class="section-title">2. Ice Annotation Tool</div>
-      <p style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 8px;">Draw polygons over river ice features.</p>
+      <p style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 8px;">
+        Draw boundaries or adjust nodes. Press <b>Delete</b> key to remove selected polygon.
+      </p>
+      
       <div class="legend-box" style="margin-bottom: 8px;">
         <div class="color-swatch"></div>
         <span>Desaturated Cyan Boundary</span>
       </div>
-      <div style="display: flex; gap: 8px;">
-        <button id="draw-btn" class="btn-secondary">Draw Ice</button>
-        <button id="clear-btn" class="btn-danger">Clear</button>
+    
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; gap: 8px;">
+          <button id="draw-btn" class="btn-secondary">Draw Polygon</button>
+          <button id="select-btn" class="btn-secondary">Select / Edit</button>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button id="delete-selected-btn" class="btn-danger" style="font-size: 0.8rem;">Delete Selected</button>
+          <button id="clear-btn" class="btn-danger" style="font-size: 0.8rem;">Clear All</button>
+        </div>
       </div>
     </div>
 
@@ -424,28 +434,111 @@ const layers = stacData.features.map((item) => {
   }
 });
 
-// --- ANNOTATION DRAWING TOOL ---
-drawBtn.addEventListener('click', () => {
-  if (drawInteraction) {
-    map.removeInteraction(drawInteraction);
-    drawInteraction = null;
-    drawBtn.innerText = 'Draw Ice';
-    drawBtn.classList.replace('btn-primary', 'btn-secondary');
-    return;
-  }
+// --- ANNOTATION INTERACTION SYSTEM (DRAW, MODIFY, SNAP, SELECT) ---
+
+// 1. Modify Interaction: Allows clicking & dragging nodes/edges on existing shapes
+const modifyInteraction = new ol.interaction.Modify({
+  source: vectorSource
+});
+
+// 2. Select Interaction: Allows clicking a polygon to highlight/delete it
+const selectInteraction = new ol.interaction.Select({
+  layers: [vectorLayer],
+  style: new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: '#ffea00', width: 4 }), // Yellow highlight when selected
+    fill: new ol.style.Fill({ color: 'rgba(255, 234, 0, 0.35)' })
+  })
+});
+
+// 3. Snap Interaction: Snaps vertices together seamlessly when drawing adjacent ice bounds
+const snapInteraction = new ol.interaction.Snap({
+  source: vectorSource
+});
+
+// Add permanent modify and snap interactions to map
+map.addInteraction(modifyInteraction);
+map.addInteraction(selectInteraction);
+map.addInteraction(snapInteraction);
+
+let drawInteraction = null;
+
+const selectBtn = document.getElementById('select-btn');
+const deleteSelectedBtn = document.getElementById('delete-selected-btn');
+
+// --- MODE SWITCHING FUNCTIONS ---
+function enableDrawMode() {
+  if (drawInteraction) map.removeInteraction(drawInteraction);
+
+  // Disable select while drawing to prevent accidental highlight triggers
+  selectInteraction.getFeatures().clear();
+  selectInteraction.setActive(false);
 
   drawInteraction = new ol.interaction.Draw({
     source: vectorSource,
     type: 'Polygon'
   });
 
+  // Re-enable select/modify as soon as double-click finishes a sketch
+  drawInteraction.on('drawend', () => {
+    setTimeout(() => {
+      enableSelectMode();
+    }, 100);
+  });
+
   map.addInteraction(drawInteraction);
-  drawBtn.innerText = 'Stop Drawing';
-  drawBtn.classList.replace('btn-secondary', 'btn-primary');
-});
+
+  // Keep Snap on top of the interaction stack
+  map.removeInteraction(snapInteraction);
+  map.addInteraction(snapInteraction);
+
+  drawBtn.style.background = '#0284c7';
+  selectBtn.style.background = '#334155';
+}
+
+function enableSelectMode() {
+  if (drawInteraction) {
+    map.removeInteraction(drawInteraction);
+    drawInteraction = null;
+  }
+  selectInteraction.setActive(true);
+
+  drawBtn.style.background = '#334155';
+  selectBtn.style.background = '#0284c7';
+}
+
+// Default to Select/Edit mode on startup
+enableSelectMode();
+
+// Button Listeners
+drawBtn.addEventListener('click', enableDrawMode);
+selectBtn.addEventListener('click', enableSelectMode);
+
+// Delete individually selected feature
+function deleteSelectedFeature() {
+  const selectedFeatures = selectInteraction.getFeatures();
+  selectedFeatures.forEach((feature) => {
+    vectorSource.removeFeature(feature);
+  });
+  selectedFeatures.clear();
+}
+
+deleteSelectedBtn.addEventListener('click', deleteSelectedFeature);
 
 clearBtn.addEventListener('click', () => {
   vectorSource.clear();
+  selectInteraction.getFeatures().clear();
+});
+
+// --- KEYBOARD SHORTCUTS ---
+document.addEventListener('keydown', (e) => {
+  // Press 'Delete' or 'Backspace' key to delete selected polygon
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    deleteSelectedFeature();
+  }
+  // Press 'Escape' to abort an active drawing sketch
+  if (e.key === 'Escape' && drawInteraction) {
+    drawInteraction.abortDrawing();
+  }
 });
 
 // --- EXPORT FUNCTION 1: GEOJSON ---
