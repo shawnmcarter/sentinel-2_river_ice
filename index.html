@@ -324,7 +324,7 @@ getImageryBtn.addEventListener('click', async () => {
 
     // 2. Timestamps (48h Window)
     const now = new Date();
-    const past = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const past = new Date(now.getTime() - 30 * 60 * 60 * 1000);
     const formatIso = (date) => date.toISOString().split('.')[0] + 'Z';
     const datetime = `${formatIso(past)}/${formatIso(now)}`;
 
