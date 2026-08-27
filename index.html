@@ -144,8 +144,10 @@
   <script>
   // --- MAP & BASE LAYERS INITIALIZATION ---
 const baseOsm = new ol.layer.Tile({
-  source: new ol.source.OSM({
-    url: 'https://{a-c}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+  source: new ol.source.XYZ({
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    attributions: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+    maxZoom: 16
   })
 });
 
