@@ -170,10 +170,10 @@ const vectorStyle = new ol.style.Style({
   fill: new ol.style.Fill({ color: 'rgba(0, 179, 179, 0.25)' })
 });
 
-//const vectorLayer = new ol.layer.Vector({
-//  source: vectorSource,
-//  style: vectorStyle
-//});
+const vectorLayer = new ol.layer.Vector({
+  source: vectorSource,
+  style: vectorStyle
+});
 
 // --- ALWAYS-ON-TOP LABELS LAYER ---
 const labelsLayer = new ol.layer.Tile({
@@ -460,7 +460,7 @@ const iceStyles = {
   })
 };
 
-//const vectorSource = new ol.source.Vector();
+const vectorSource = new ol.source.Vector();
 
 // Feature style function driven by 'ice_type' property
 const vectorLayer = new ol.layer.Vector({
