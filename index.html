@@ -109,28 +109,35 @@
       </div>
     </div>
 
-    <div>
-      <div class="section-title">2. Ice Annotation Tool</div>
-      <p style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 8px;">
-        Draw boundaries or adjust nodes. Press <b>Delete</b> key to remove selected polygon.
-      </p>
-      
-      <div class="legend-box" style="margin-bottom: 8px;">
-        <div class="color-swatch"></div>
-        <span>Ice Polygon</span>
-      </div>
+  <div>
+    <div class="section-title">2. Ice Annotation Tool</div>
+    <p style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 8px;">
+      Select an ice class to draw boundaries. Press <b>Delete</b> to remove selected shapes.
+    </p>
     
-      <div style="display: flex; flex-direction: column; gap: 8px;">
-        <div style="display: flex; gap: 8px;">
-          <button id="draw-btn" class="btn-secondary">Draw Polygon</button>
-          <button id="select-btn" class="btn-secondary">Select / Edit</button>
-        </div>
-        <div style="display: flex; gap: 8px;">
-          <button id="delete-selected-btn" class="btn-danger" style="font-size: 0.8rem;">Delete Selected</button>
-          <button id="clear-btn" class="btn-danger" style="font-size: 0.8rem;">Clear All</button>
-        </div>
+    <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px;">
+      <div class="legend-box">
+        <div class="color-swatch" style="border-color: #00b3b3; background: rgba(0, 179, 179, 0.25);"></div>
+        <span>Mobile Ice</span>
+      </div>
+      <div class="legend-box">
+        <div class="color-swatch" style="border-color: #ffe600; background: rgba(255, 230, 0, 0.25);"></div>
+        <span>Shorefast Ice</span>
       </div>
     </div>
+  
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="display: flex; gap: 8px;">
+        <button id="draw-mobile-btn" class="btn-secondary" style="font-size: 0.8rem;">Mobile Ice</button>
+        <button id="draw-fast-btn" class="btn-secondary" style="font-size: 0.8rem;">Shorefast Ice</button>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <button id="select-btn" class="btn-secondary">Select / Edit</button>
+        <button id="delete-selected-btn" class="btn-danger" style="font-size: 0.8rem;">Delete</button>
+      </div>
+      <button id="clear-btn" class="btn-danger" style="font-size: 0.8rem;">Clear All</button>
+    </div>
+  </div>
 
     <div style="margin-top: auto;">
       <div class="section-title">3. Products Export</div>
@@ -441,39 +448,61 @@ getImageryBtn.addEventListener('click', async () => {
 
 // --- ANNOTATION INTERACTION SYSTEM (DRAW, MODIFY, SNAP, SELECT) ---
 
-// 1. Modify Interaction: Allows clicking & dragging nodes/edges on existing shapes
+// --- DYNAMIC ICE VECTOR STYLES ---
+const iceStyles = {
+  mobile: new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: '#00b3b3', width: 4 }),
+    fill: new ol.style.Fill({ color: 'rgba(0, 179, 179, 0.25)' })
+  }),
+  shorefast: new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: '#ffe600', width: 4 }),
+    fill: new ol.style.Fill({ color: 'rgba(255, 230, 0, 0.25)' })
+  })
+};
+
+const vectorSource = new ol.source.Vector();
+
+// Feature style function driven by 'ice_type' property
+const vectorLayer = new ol.layer.Vector({
+  source: vectorSource,
+  style: (feature) => {
+    const type = feature.get('ice_type') || 'mobile';
+    return iceStyles[type] || iceStyles.mobile;
+  }
+});
+
+// --- ANNOTATION INTERACTION SYSTEM ---
 const modifyInteraction = new ol.interaction.Modify({
   source: vectorSource
 });
 
-// 2. Select Interaction: Allows clicking a polygon to highlight/delete it
+// Highlight selected feature in bright magenta (#ff007f) so yellow Shorefast ice remains distinguishable
 const selectInteraction = new ol.interaction.Select({
   layers: [vectorLayer],
   style: new ol.style.Style({
-    stroke: new ol.style.Stroke({ color: '#ffea00', width: 4 }), // Yellow highlight when selected
-    fill: new ol.style.Fill({ color: 'rgba(255, 234, 0, 0.35)' })
+    stroke: new ol.style.Stroke({ color: '#ff007f', width: 4 }),
+    fill: new ol.style.Fill({ color: 'rgba(255, 0, 127, 0.35)' })
   })
 });
 
-// 3. Snap Interaction: Snaps vertices together seamlessly when drawing adjacent ice bounds
 const snapInteraction = new ol.interaction.Snap({
   source: vectorSource
 });
 
-// Add permanent modify and snap interactions to map
 map.addInteraction(modifyInteraction);
 map.addInteraction(selectInteraction);
 map.addInteraction(snapInteraction);
 
-
+let activeIceType = 'mobile';
+const drawMobileBtn = document.getElementById('draw-mobile-btn');
+const drawFastBtn = document.getElementById('draw-fast-btn');
 const selectBtn = document.getElementById('select-btn');
 const deleteSelectedBtn = document.getElementById('delete-selected-btn');
 
-// --- MODE SWITCHING FUNCTIONS ---
-function enableDrawMode() {
+function enableDrawMode(iceType) {
+  activeIceType = iceType;
   if (drawInteraction) map.removeInteraction(drawInteraction);
 
-  // Disable select while drawing to prevent accidental highlight triggers
   selectInteraction.getFeatures().clear();
   selectInteraction.setActive(false);
 
@@ -482,20 +511,21 @@ function enableDrawMode() {
     type: 'Polygon'
   });
 
-  // Re-enable select/modify as soon as double-click finishes a sketch
-  drawInteraction.on('drawend', () => {
+  // Tag feature with its ice type upon completion
+  drawInteraction.on('drawend', (e) => {
+    e.feature.set('ice_type', activeIceType);
     setTimeout(() => {
       enableSelectMode();
     }, 100);
   });
 
   map.addInteraction(drawInteraction);
-
-  // Keep Snap on top of the interaction stack
   map.removeInteraction(snapInteraction);
   map.addInteraction(snapInteraction);
 
-  drawBtn.style.background = '#0284c7';
+  // Active UI button highlighting
+  drawMobileBtn.style.background = (iceType === 'mobile') ? '#0284c7' : '#334155';
+  drawFastBtn.style.background = (iceType === 'shorefast') ? '#0284c7' : '#334155';
   selectBtn.style.background = '#334155';
 }
 
@@ -506,44 +536,18 @@ function enableSelectMode() {
   }
   selectInteraction.setActive(true);
 
-  drawBtn.style.background = '#334155';
+  drawMobileBtn.style.background = '#334155';
+  drawFastBtn.style.background = '#334155';
   selectBtn.style.background = '#0284c7';
 }
 
-// Default to Select/Edit mode on startup
+// Initial state
 enableSelectMode();
 
-// Button Listeners
-drawBtn.addEventListener('click', enableDrawMode);
+// Listeners
+drawMobileBtn.addEventListener('click', () => enableDrawMode('mobile'));
+drawFastBtn.addEventListener('click', () => enableDrawMode('shorefast'));
 selectBtn.addEventListener('click', enableSelectMode);
-
-// Delete individually selected feature
-function deleteSelectedFeature() {
-  const selectedFeatures = selectInteraction.getFeatures();
-  selectedFeatures.forEach((feature) => {
-    vectorSource.removeFeature(feature);
-  });
-  selectedFeatures.clear();
-}
-
-deleteSelectedBtn.addEventListener('click', deleteSelectedFeature);
-
-clearBtn.addEventListener('click', () => {
-  vectorSource.clear();
-  selectInteraction.getFeatures().clear();
-});
-
-// --- KEYBOARD SHORTCUTS ---
-document.addEventListener('keydown', (e) => {
-  // Press 'Delete' or 'Backspace' key to delete selected polygon
-  if (e.key === 'Delete' || e.key === 'Backspace') {
-    deleteSelectedFeature();
-  }
-  // Press 'Escape' to abort an active drawing sketch
-  if (e.key === 'Escape' && drawInteraction) {
-    drawInteraction.abortDrawing();
-  }
-});
 
 // --- EXPORT FUNCTION 1: GEOJSON ---
 exportGeoJsonBtn.addEventListener('click', () => {
