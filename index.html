@@ -161,37 +161,50 @@ const baseOsm = new ol.layer.Tile({
   })
 });
 
-// Container for multi-tile scene mosaics
 const cogGroup = new ol.layer.Group();
 
+// --- ICE CLASSIFICATION STYLES & VECTOR LAYER ---
+const iceStyles = {
+  mobile: new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: '#00b3b3', width: 4 }),
+    fill: new ol.style.Fill({ color: 'rgba(0, 179, 179, 0.25)' })
+  }),
+  shorefast: new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: '#ffe600', width: 4 }),
+    fill: new ol.style.Fill({ color: 'rgba(255, 230, 0, 0.25)' })
+  })
+};
+
 const vectorSource = new ol.source.Vector();
-const vectorStyle = new ol.style.Style({
-  stroke: new ol.style.Stroke({ color: '#00b3b3', width: 4 }),
-  fill: new ol.style.Fill({ color: 'rgba(0, 179, 179, 0.25)' })
-});
 
 const vectorLayer = new ol.layer.Vector({
   source: vectorSource,
-  style: vectorStyle
+  style: (feature) => {
+    const type = feature.get('ice_type') || 'mobile';
+    return iceStyles[type] || iceStyles.mobile;
+  }
 });
 
-// --- ALWAYS-ON-TOP LABELS LAYER ---
 const labelsLayer = new ol.layer.Tile({
   source: new ol.source.OSM({
     url: 'https://{a-c}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',
-    crossOrigin: 'anonymous' // Crucial for clean canvas PNG exports
+    crossOrigin: 'anonymous'
   })
 });
-
-let drawInteraction = null;
 
 // --- DOM ELEMENTS ---
 const getImageryBtn = document.getElementById('get-imagery-btn');
 const statusMsg = document.getElementById('status-msg');
-const drawBtn = document.getElementById('draw-btn');
+const drawMobileBtn = document.getElementById('draw-mobile-btn');
+const drawFastBtn = document.getElementById('draw-fast-btn');
+const selectBtn = document.getElementById('select-btn');
+const deleteSelectedBtn = document.getElementById('delete-selected-btn');
 const clearBtn = document.getElementById('clear-btn');
 const exportGeoJsonBtn = document.getElementById('export-geojson-btn');
 const exportPngBtn = document.getElementById('export-png-btn');
+const stretchSlider = document.getElementById('stretch-slider');
+const stretchVal = document.getElementById('stretch-val');
+const aoiSelect = document.getElementById('aoi-select');
 
 function showStatus(message, type) {
   statusMsg.innerText = message;
@@ -202,9 +215,7 @@ function showStatus(message, type) {
 function hideStatus() {
   statusMsg.style.display = 'none';
 }
-// --- DOM ELEMENTS 
-const stretchSlider = document.getElementById('stretch-slider');
-const stretchVal = document.getElementById('stretch-val');
+
 // --- EMBEDDED AOI GEOJSON DATA ---
 const AOI_GEOJSON = {
   "type": "FeatureCollection",
@@ -230,14 +241,12 @@ const AOI_GEOJSON = {
   ]
 };
 
-// --- READ AOI FEATURES & INITIALIZE MAP LAYER ---
 const aoiFormat = new ol.format.GeoJSON();
 const aoiFeatures = aoiFormat.readFeatures(AOI_GEOJSON, {
   dataProjection: 'EPSG:4326',
   featureProjection: 'EPSG:3857'
 });
 
-// Create reference footprint vector layer for AOI boundaries
 const aoiLayer = new ol.layer.Vector({
   source: new ol.source.Vector({ features: aoiFeatures }),
   style: new ol.style.Style({
@@ -246,25 +255,23 @@ const aoiLayer = new ol.layer.Vector({
   })
 });
 
-// --- MAP SETUP  ---
+// --- MAP SETUP ---
 const map = new ol.Map({
   target: 'map',
   layers: [
-    baseOsm,      // 0: Dark base map
-    cogGroup,     // 1: Sentinel-2 COG mosaic
-    aoiLayer,     // 2: Reference AOI footprints
-    labelsLayer,  // 3: Transparent Labels (Towns, Rivers, Borders)
-    vectorLayer   // 4: Hydrologist Drawing Annotations (topmost)
+    baseOsm,      // 0: Base Map
+    cogGroup,     // 1: Imagery Mosaics
+    aoiLayer,     // 2: Reference Footprints
+    labelsLayer,  // 3: Labels Overlay
+    vectorLayer   // 4: Drawing Annotations
   ],
   view: new ol.View({
     center: ol.proj.fromLonLat([-80.0, 43.0]),
     zoom: 5
   })
 });
-// --- POPULATE DROPDOWN & HANDLE NAVIGATION ---
-const aoiSelect = document.getElementById('aoi-select');
 
-// Dynamically populate options sorted alphabetically
+// Populate AOI Dropdown
 const sortedFeatures = [...aoiFeatures].sort((a, b) => 
   a.get('Area_of_Interest').localeCompare(b.get('Area_of_Interest'))
 );
@@ -277,17 +284,13 @@ sortedFeatures.forEach((feature) => {
   aoiSelect.appendChild(option);
 });
 
-// Zoom and pan to AOI centroid/extent on selection
 aoiSelect.addEventListener('change', (e) => {
   const selectedName = e.target.value;
   if (!selectedName) return;
 
   const selectedFeature = aoiFeatures.find(f => f.get('Area_of_Interest') === selectedName);
   if (selectedFeature) {
-    const geom = selectedFeature.getGeometry();
-    const extent = geom.getExtent();
-
-    // Smoothly animate map camera to fit selected AOI footprint
+    const extent = selectedFeature.getGeometry().getExtent();
     map.getView().fit(extent, {
       duration: 1000,
       padding: [40, 40, 40, 40]
@@ -300,7 +303,6 @@ let cachedSasToken = null;
 let tokenExpiry = null;
 
 async function getSasToken() {
-  // Reuse token if cached and not expired
   if (cachedSasToken && tokenExpiry && new Date() < tokenExpiry) {
     return cachedSasToken;
   }
@@ -323,7 +325,6 @@ getImageryBtn.addEventListener('click', async () => {
   getImageryBtn.innerText = 'Searching STAC...';
 
   try {
-    // 1. Calculate & Clamp Bounding Box [-180, -90, 180, 90]
     const extent = map.getView().calculateExtent(map.getSize());
     const rawBbox = ol.proj.transformExtent(extent, map.getView().getProjection(), 'EPSG:4326');
     
@@ -334,13 +335,8 @@ getImageryBtn.addEventListener('click', async () => {
       Math.max(-90, Math.min(90, rawBbox[3]))
     ];
 
-    // 2. Timestamps (48h Window)
-    const now = new Date();
-    const past = new Date(now.getTime() - 30 * 60 * 60 * 1000);
-    const formatIso = (date) => date.toISOString().split('.')[0] + 'Z';
-    //const datetime = `${formatIso(past)}/${formatIso(now)}`;
-    const datetime = '2026-02-08T08:46:57Z/2026-02-09T14:46:57Z'
-    // 3. Query STAC for up to 10 matching tiles
+    const datetime = '2026-02-08T08:46:57Z/2026-02-09T14:46:57Z';
+
     const stacQuery = {
       collections: ['sentinel-2-l2a'],
       bbox: bbox,
@@ -365,66 +361,61 @@ getImageryBtn.addEventListener('click', async () => {
     const stacData = await res.json();
 
     if (!stacData.features || stacData.features.length === 0) {
-      showStatus('No imagery acquired in the search window (48h).', 'error');
+      showStatus('No imagery acquired in the search window.', 'error');
       return;
     }
 
     showStatus(`Found ${stacData.features.length} scene(s). Fetching token & loading...`, 'info');
 
-    // 4. Retrieve single Collection Token (1 request total)
     const sasToken = await getSasToken();
-
-    // 5. Clear existing satellite layers
     cogGroup.getLayers().clear();
 
-    // --- LAYER CREATION INSIDE getImageryBtn HANDLER ---
     const currentStretch = Number(stretchSlider.value);
     
     const layers = stacData.features.map((item) => {
-    const b12 = item.assets['B12']?.href;
-    const b8a = item.assets['B8A']?.href;
-    const b04 = item.assets['B04']?.href;
-  
-    if (!b12 || !b8a || !b04) return null;
-  
-    const signedB12 = `${b12}?${sasToken}`;
-    const signedB8A = `${b8a}?${sasToken}`;
-    const signedB04 = `${b04}?${sasToken}`;
-  
-    const cogSource = new ol.source.GeoTIFF({
-      sources: [
-        { url: signedB12 },
-        { url: signedB8A },
-        { url: signedB04 }
-      ],
-      normalize: false,
-      loadMissingProjection: true
-    });
+      const b12 = item.assets['B12']?.href;
+      const b8a = item.assets['B8A']?.href;
+      const b04 = item.assets['B04']?.href;
+      
+      if (!b12 || !b8a || !b04) return null;
+      
+      const signedB12 = `${b12}?${sasToken}`;
+      const signedB8A = `${b8a}?${sasToken}`;
+      const signedB04 = `${b04}?${sasToken}`;
+      
+      const cogSource = new ol.source.GeoTIFF({
+        sources: [
+          { url: signedB12 },
+          { url: signedB8A },
+          { url: signedB04 }
+        ],
+        normalize: false,
+        loadMissingProjection: true
+      });
 
-    return new ol.layer.WebGLTile({
-      source: cogSource,
-      style: {
-        variables: {
-          maxReflectance: currentStretch
-        },
-        color: [
-          'array',
-          ['/', ['band', 1], ['var', 'maxReflectance']], // Red = B12
-          ['/', ['band', 2], ['var', 'maxReflectance']], // Green = B8A
-          ['/', ['band', 3], ['var', 'maxReflectance']], // Blue = B04
-          
-          ['case',
-            ['all',
-              ['>', ['band', 1], 0],
-              ['>', ['band', 2], 0],
-              ['>', ['band', 3], 0]
-            ],
-            1,
-            0
+      return new ol.layer.WebGLTile({
+        source: cogSource,
+        style: {
+          variables: {
+            maxReflectance: currentStretch
+          },
+          color: [
+            'array',
+            ['/', ['band', 1], ['var', 'maxReflectance']],
+            ['/', ['band', 2], ['var', 'maxReflectance']],
+            ['/', ['band', 3], ['var', 'maxReflectance']],
+            ['case',
+              ['all',
+                ['>', ['band', 1], 0],
+                ['>', ['band', 2], 0],
+                ['>', ['band', 3], 0]
+              ],
+              1,
+              0
+            ]
           ]
-        ]
-      }
-    });
+        }
+      });
     }).filter(Boolean);
 
     if (layers.length === 0) {
@@ -432,9 +423,7 @@ getImageryBtn.addEventListener('click', async () => {
       return;
     }
 
-    // 7. Add all resolved layers to map
     layers.forEach(layer => cogGroup.getLayers().push(layer));
-
     showStatus(`Successfully loaded ${layers.length} scene(s) into view.`, 'info');
 
   } catch (err) {
@@ -442,33 +431,17 @@ getImageryBtn.addEventListener('click', async () => {
     showStatus(`Error: ${err.message}`, 'error');
   } finally {
     getImageryBtn.disabled = false;
-    getImageryBtn.innerText = 'Get Imagery';
+    getImageryBtn.innerText = 'Get Imagery (Last 30h)';
   }
 });
 
-// --- ANNOTATION INTERACTION SYSTEM (DRAW, MODIFY, SNAP, SELECT) ---
-
-// --- DYNAMIC ICE VECTOR STYLES ---
-const iceStyles = {
-  mobile: new ol.style.Style({
-    stroke: new ol.style.Stroke({ color: '#00b3b3', width: 4 }),
-    fill: new ol.style.Fill({ color: 'rgba(0, 179, 179, 0.25)' })
-  }),
-  shorefast: new ol.style.Style({
-    stroke: new ol.style.Stroke({ color: '#ffe600', width: 4 }),
-    fill: new ol.style.Fill({ color: 'rgba(255, 230, 0, 0.25)' })
-  })
-};
-
-const vectorSource = new ol.source.Vector();
-
-// Feature style function driven by 'ice_type' property
-const vectorLayer = new ol.layer.Vector({
-  source: vectorSource,
-  style: (feature) => {
-    const type = feature.get('ice_type') || 'mobile';
-    return iceStyles[type] || iceStyles.mobile;
-  }
+// Dynamic Histogram Stretch
+stretchSlider.addEventListener('input', (e) => {
+  const newMax = Number(e.target.value);
+  stretchVal.innerText = newMax;
+  cogGroup.getLayers().forEach((layer) => {
+    layer.updateStyleVariables({ maxReflectance: newMax });
+  });
 });
 
 // --- ANNOTATION INTERACTION SYSTEM ---
@@ -476,11 +449,10 @@ const modifyInteraction = new ol.interaction.Modify({
   source: vectorSource
 });
 
-// Highlight selected feature in bright magenta (#ff007f) so yellow Shorefast ice remains distinguishable
 const selectInteraction = new ol.interaction.Select({
   layers: [vectorLayer],
   style: new ol.style.Style({
-    stroke: new ol.style.Stroke({ color: '#ff007f', width: 4 }),
+    stroke: new ol.style.Stroke({ color: '#ff007f', width: 4 }), // Magenta highlight
     fill: new ol.style.Fill({ color: 'rgba(255, 0, 127, 0.35)' })
   })
 });
@@ -493,11 +465,8 @@ map.addInteraction(modifyInteraction);
 map.addInteraction(selectInteraction);
 map.addInteraction(snapInteraction);
 
+let drawInteraction = null;
 let activeIceType = 'mobile';
-const drawMobileBtn = document.getElementById('draw-mobile-btn');
-const drawFastBtn = document.getElementById('draw-fast-btn');
-const selectBtn = document.getElementById('select-btn');
-const deleteSelectedBtn = document.getElementById('delete-selected-btn');
 
 function enableDrawMode(iceType) {
   activeIceType = iceType;
@@ -511,7 +480,6 @@ function enableDrawMode(iceType) {
     type: 'Polygon'
   });
 
-  // Tag feature with its ice type upon completion
   drawInteraction.on('drawend', (e) => {
     e.feature.set('ice_type', activeIceType);
     setTimeout(() => {
@@ -523,7 +491,6 @@ function enableDrawMode(iceType) {
   map.removeInteraction(snapInteraction);
   map.addInteraction(snapInteraction);
 
-  // Active UI button highlighting
   drawMobileBtn.style.background = (iceType === 'mobile') ? '#0284c7' : '#334155';
   drawFastBtn.style.background = (iceType === 'shorefast') ? '#0284c7' : '#334155';
   selectBtn.style.background = '#334155';
@@ -541,15 +508,37 @@ function enableSelectMode() {
   selectBtn.style.background = '#0284c7';
 }
 
-// Initial state
 enableSelectMode();
 
-// Listeners
 drawMobileBtn.addEventListener('click', () => enableDrawMode('mobile'));
 drawFastBtn.addEventListener('click', () => enableDrawMode('shorefast'));
 selectBtn.addEventListener('click', enableSelectMode);
 
-// --- EXPORT FUNCTION 1: GEOJSON ---
+function deleteSelectedFeature() {
+  const selectedFeatures = selectInteraction.getFeatures();
+  selectedFeatures.forEach((feature) => {
+    vectorSource.removeFeature(feature);
+  });
+  selectedFeatures.clear();
+}
+
+deleteSelectedBtn.addEventListener('click', deleteSelectedFeature);
+
+clearBtn.addEventListener('click', () => {
+  vectorSource.clear();
+  selectInteraction.getFeatures().clear();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    deleteSelectedFeature();
+  }
+  if (e.key === 'Escape' && drawInteraction) {
+    drawInteraction.abortDrawing();
+  }
+});
+
+// --- PRODUCT EXPORTS ---
 exportGeoJsonBtn.addEventListener('click', () => {
   if (vectorSource.getFeatures().length === 0) {
     alert('No ice boundary annotations to export!');
@@ -562,7 +551,6 @@ exportGeoJsonBtn.addEventListener('click', () => {
     dataProjection: 'EPSG:4326'
   });
 
-  // Format AOI name for filename
   const selectedAoi = aoiSelect.value;
   const sanitizedAoi = selectedAoi 
     ? selectedAoi.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') 
@@ -578,13 +566,10 @@ exportGeoJsonBtn.addEventListener('click', () => {
   URL.revokeObjectURL(url);
 });
 
-// --- EXPORT FUNCTION 2: VIEWPORT PNG (SUPPRESSES AOI LAYER) ---
 exportPngBtn.addEventListener('click', () => {
-  // 1. Store original visibility and temporarily hide reference AOI layer
   const wasAoiVisible = aoiLayer.getVisible();
   aoiLayer.setVisible(false);
 
-  // 2. Render and capture screen frame without AOI layer
   map.once('rendercomplete', () => {
     const mapCanvas = document.createElement('canvas');
     const size = map.getSize();
@@ -603,7 +588,6 @@ exportPngBtn.addEventListener('click', () => {
       }
     );
 
-    // Format AOI name for filename
     const selectedAoi = aoiSelect.value;
     const sanitizedAoi = selectedAoi 
       ? selectedAoi.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') 
@@ -615,7 +599,6 @@ exportPngBtn.addEventListener('click', () => {
     link.href = mapCanvas.toDataURL('image/png');
     link.click();
 
-    // 3. Restore AOI layer visibility on the map
     aoiLayer.setVisible(wasAoiVisible);
   });
 
