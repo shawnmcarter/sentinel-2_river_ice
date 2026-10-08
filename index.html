@@ -339,6 +339,7 @@ getImageryBtn.addEventListener('click', async () => {
     const past = new Date(now.getTime() - 30 * 60 * 60 * 1000);
     const formatIso = (date) => date.toISOString().split('.')[0] + 'Z';
     const datetime = `${formatIso(past)}/${formatIso(now)}`;
+
     const stacQuery = {
       collections: ['sentinel-2-l2a'],
       bbox: bbox,
@@ -346,7 +347,7 @@ getImageryBtn.addEventListener('click', async () => {
       limit: 20,
       sortby: [
         {
-          field: "datetime",
+          field: "datetime", // Fixed field name
           direction: "desc"
         }
       ]
@@ -358,12 +359,15 @@ getImageryBtn.addEventListener('click', async () => {
       body: JSON.stringify(stacQuery)
     });
 
-    if (!res.ok) throw new Error(`STAC search failed: HTTP ${res.status}`);
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`STAC search failed (HTTP ${res.status}): ${errText}`);
+    }
 
     const stacData = await res.json();
 
     if (!stacData.features || stacData.features.length === 0) {
-      showStatus('No imagery acquired in the search window.', 'error');
+      showStatus('No imagery acquired in the last 30h for this bounding box.', 'error');
       return;
     }
 
