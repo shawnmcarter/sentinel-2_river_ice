@@ -335,8 +335,10 @@ getImageryBtn.addEventListener('click', async () => {
       Math.max(-90, Math.min(90, rawBbox[3]))
     ];
 
-    const datetime = '2026-02-08T08:46:57Z/2026-02-09T14:46:57Z';
-
+    const now = new Date();
+    const past = new Date(now.getTime() - 30 * 60 * 60 * 1000);
+    const formatIso = (date) => date.toISOString().split('.'[0] + 'Z';
+    const datetime = `${formatIso(past)}/${formatIso(now)}`;
     const stacQuery = {
       collections: ['sentinel-2-l2a'],
       bbox: bbox,
