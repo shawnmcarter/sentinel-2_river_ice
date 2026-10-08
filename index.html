@@ -337,7 +337,7 @@ getImageryBtn.addEventListener('click', async () => {
 
     const now = new Date();
     const past = new Date(now.getTime() - 30 * 60 * 60 * 1000);
-    const formatIso = (date) => date.toISOString().split('.'[0] + 'Z';
+    const formatIso = (date) => date.toISOString().split('.')[0] + 'Z';
     const datetime = `${formatIso(past)}/${formatIso(now)}`;
     const stacQuery = {
       collections: ['sentinel-2-l2a'],
