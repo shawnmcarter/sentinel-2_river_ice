@@ -153,18 +153,20 @@
   <script>
     
 // --- MAP & BASE LAYERS INITIALIZATION ---
-const baseOsm = new ol.layer.Tile({
+const baseDark = new ol.layer.Tile({
   source: new ol.source.XYZ({
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
     attributions: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
     maxZoom: 16
   })
 });
-const baseDark = new ol.layer.Tile({
+
+// 2. Dark Labels Overlay
+const labelsLayer = new ol.layer.Tile({
   source: new ol.source.XYZ({
-    url: 'https://{a-c}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attributions: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxZoom: 19
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+    attributions: 'Tiles &copy; Esri',
+    maxZoom: 16
   })
 });
 const cogGroup = new ol.layer.Group();
