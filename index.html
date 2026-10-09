@@ -193,13 +193,6 @@ const vectorLayer = new ol.layer.Vector({
   }
 });
 
-const labelsLayer = new ol.layer.Tile({
-  source: new ol.source.OSM({
-    url: 'https://{a-c}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',
-    crossOrigin: 'anonymous'
-  })
-});
-
 // --- DOM ELEMENTS ---
 const getImageryBtn = document.getElementById('get-imagery-btn');
 const statusMsg = document.getElementById('status-msg');
